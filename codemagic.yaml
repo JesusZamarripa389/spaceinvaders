@@ -1,0 +1,73 @@
+# Codemagic CI/CD - Space Invaders (iOS)
+# Autor: Jesús Antonio Zamarripa Calleros. 23130049
+#
+# Dos flujos de trabajo:
+#   1) ios-sin-firma : genera un .ipa SIN firmar. Se instala en el iPhone con
+#                      Sideloadly / AltStore usando tu Apple ID (gratuito).
+#   2) ios-firmado   : genera un .ipa firmado (development / ad hoc) listo para
+#                      instalar. Requiere cuenta de Apple Developer y la
+#                      integración de App Store Connect configurada en Codemagic.
+
+workflows:
+  ios-sin-firma:
+    name: iOS - IPA sin firmar
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Compilar (sin firma)
+        script: |
+          xcodebuild \
+            -project SpaceInvaders.xcodeproj \
+            -scheme SpaceInvaders \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+      - name: Empaquetar IPA
+        script: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/SpaceInvaders.app Payload/
+          zip -qry SpaceInvaders-unsigned.ipa Payload
+    artifacts:
+      - SpaceInvaders-unsigned.ipa
+
+  ios-firmado:
+    name: iOS - IPA firmado
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    integrations:
+      # Nombre de la clave de API de App Store Connect que agregaste en
+      # Codemagic (Teams > Integrations > Developer Portal).
+      app_store_connect: codemagic
+    environment:
+      xcode: latest
+      vars:
+        # Cambia esto por un identificador único tuyo.
+        BUNDLE_ID: "com.jesuszamarripa.SpaceInvaders"
+      ios_signing:
+        # development: instala en dispositivos registrados en tu cuenta.
+        # Usa ad_hoc si lo prefieres.
+        distribution_type: development
+        bundle_identifier: $BUNDLE_ID
+    scripts:
+      - name: Ajustar bundle identifier
+        script: |
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = none.SpaceInvaders;/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" \
+            SpaceInvaders.xcodeproj/project.pbxproj
+      - name: Aplicar perfiles de firma
+        script: xcode-project use-profiles
+      - name: Compilar IPA
+        script: |
+          xcode-project build-ipa \
+            --project SpaceInvaders.xcodeproj \
+            --scheme SpaceInvaders \
+            --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
